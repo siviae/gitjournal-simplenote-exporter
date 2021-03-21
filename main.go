@@ -9,6 +9,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"io"
 	"log"
+	"math/rand"
 	"os"
 	"path"
 	"time"
@@ -61,12 +62,18 @@ func processActiveNote(output *string, w *git.Worktree) func(value []byte, dataT
 		content, err := jsonparser.GetString(value, "content")
 		creationDate, err := jsonparser.GetString(value, "creationDate")
 		lastModified, err := jsonparser.GetString(value, "lastModified")
-		writeAndCommitFile(w, output, &content, &creationDate, &lastModified)
+		filename := writeFile(&content, output, &creationDate, &lastModified)
+		commitFile(w, filename)
 	}
 }
 
-func writeAndCommitFile(w *git.Worktree, folder *string, content *string, creationDate *string, lastModified *string) {
-	filename := writeFile(content, folder, creationDate, lastModified)
+func processTrashedNote(output *string, w *git.Worktree) func(value []byte, dataType jsonparser.ValueType, offset int, err error) {
+	return func(value []byte, dataType jsonparser.ValueType, offset int, err error) {
+		//_, err := jsonparser.GetString(value, "content")
+	}
+}
+
+func commitFile(w *git.Worktree, filename string) {
 	_, err := w.Add(filename)
 	if err != nil {
 		fmt.Println("Unable to add file to worktree: ", filename)
@@ -80,31 +87,44 @@ func writeAndCommitFile(w *git.Worktree, folder *string, content *string, creati
 		},
 	})
 	if err2 != nil {
-		fmt.Println("Unable to commit file: ", filename)
+		fmt.Println("Unable to commit file:", filename)
 		log.Fatal(err)
 	}
 }
 
 func writeFile(content *string, folder *string, creationDate *string, lastModified *string) string {
-	filename := extractFileName(content) + ".md"
-	if len(filename) == 0 {
+	extractedName := extractFileName(content)
+	if len(extractedName) == 0 {
 		return ""
 	}
-
+	filename := extractedName + ".md"
+	_, err := os.Stat(path.Join(*folder, filename))
+	if !os.IsNotExist(err) {
+		filename = extractedName + "_" + randomSuffix(5) + ".md"
+	}
 	file, err := os.Create(path.Join(*folder, filename))
 	if err != nil {
-		fmt.Println("Unable to read source/notes.json from archive")
+		fmt.Println("Unable to create new file:", filename)
 		log.Fatal(err)
 	}
 	defer file.Close()
 	fmt.Fprintln(file, "---")
-	fmt.Fprintln(file, "created: ", *creationDate)
-	fmt.Fprintln(file, "modified: ", *lastModified)
+	fmt.Fprintln(file, "created:", *creationDate)
+	fmt.Fprintln(file, "modified:", *lastModified)
 	fmt.Fprintln(file, "---")
 	fmt.Fprint(file, *content)
 	return filename
 }
 
+var letters = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
+
+func randomSuffix(n int) string {
+	b := make([]rune, n)
+	for i := range b {
+		b[i] = letters[rand.Intn(len(letters))]
+	}
+	return string(b)
+}
 func extractFileName(content *string) string {
 	size := 0
 	filename := make([]rune, 0, 128)
@@ -122,13 +142,6 @@ func extractFileName(content *string) string {
 		size++
 	}
 	return string(filename)
-}
-
-func processTrashedNote(output *string, w *git.Worktree) func(value []byte, dataType jsonparser.ValueType, offset int, err error) {
-	return func(value []byte, dataType jsonparser.ValueType, offset int, err error) {
-		content, err := jsonparser.GetString(value, "content")
-		fmt.Println("Trashed: ", content)
-	}
 }
 
 func processNotes(output *string, w *git.Worktree, file *zip.File) {
