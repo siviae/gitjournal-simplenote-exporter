@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"github.com/buger/jsonparser"
 	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing/object"
 	"io"
 	"log"
 	"os"
 	"path"
+	"time"
 )
 
 func doMain(input *string, output *string) {
@@ -27,43 +29,69 @@ func doMain(input *string, output *string) {
 		needToInit = false
 	}
 
+	var repo *git.Repository
 	if needToInit {
-		_, err := git.PlainInit(*output, false)
+		repo, err = git.PlainInit(*output, false)
 		if err != nil {
 			fmt.Println("Failed to init git repository")
 			log.Fatal(err)
 		}
 	} else {
-		_, err := git.PlainOpen(*output)
+		repo, err = git.PlainOpen(*output)
 		if err != nil {
 			fmt.Println("Failed to open existing git repository")
 			log.Fatal(err)
 		}
 	}
+	w, err := repo.Worktree()
+	if err != nil {
+		fmt.Println("Failed to open existing git repository")
+		log.Fatal(err)
+	}
 
 	for _, file := range zipReader.File {
 		if file.Name == "source/notes.json" {
-			processNotes(output, file)
+			processNotes(output, w, file)
 		}
 	}
 }
 
-func processActiveNote(output *string) func(value []byte, dataType jsonparser.ValueType, offset int, err error) {
+func processActiveNote(output *string, w *git.Worktree) func(value []byte, dataType jsonparser.ValueType, offset int, err error) {
 	return func(value []byte, dataType jsonparser.ValueType, offset int, err error) {
 		content, err := jsonparser.GetString(value, "content")
 		creationDate, err := jsonparser.GetString(value, "creationDate")
 		lastModified, err := jsonparser.GetString(value, "lastModified")
-		writeFile(output, &content, &creationDate, &lastModified)
+		writeAndCommitFile(w, output, &content, &creationDate, &lastModified)
 	}
 }
 
-func writeFile(folder *string, content *string, creationDate *string, lastModified *string) {
-	filename := extractFileName(content)
+func writeAndCommitFile(w *git.Worktree, folder *string, content *string, creationDate *string, lastModified *string) {
+	filename := writeFile(content, folder, creationDate, lastModified)
+	_, err := w.Add(filename)
+	if err != nil {
+		fmt.Println("Unable to add file to worktree: ", filename)
+		log.Fatal(err)
+	}
+	_, err2 := w.Commit("Exported "+filename, &git.CommitOptions{
+		Author: &object.Signature{
+			Name:  "GitJournal Exporter",
+			Email: "a@b.c",
+			When:  time.Now(),
+		},
+	})
+	if err2 != nil {
+		fmt.Println("Unable to commit file: ", filename)
+		log.Fatal(err)
+	}
+}
+
+func writeFile(content *string, folder *string, creationDate *string, lastModified *string) string {
+	filename := extractFileName(content) + ".md"
 	if len(filename) == 0 {
-		return
+		return ""
 	}
 
-	file, err := os.Create(path.Join(*folder, filename+".md"))
+	file, err := os.Create(path.Join(*folder, filename))
 	if err != nil {
 		fmt.Println("Unable to read source/notes.json from archive")
 		log.Fatal(err)
@@ -74,6 +102,7 @@ func writeFile(folder *string, content *string, creationDate *string, lastModifi
 	fmt.Fprintln(file, "modified: ", *lastModified)
 	fmt.Fprintln(file, "---")
 	fmt.Fprint(file, *content)
+	return filename
 }
 
 func extractFileName(content *string) string {
@@ -95,14 +124,14 @@ func extractFileName(content *string) string {
 	return string(filename)
 }
 
-func processTrashedNote(output *string) func(value []byte, dataType jsonparser.ValueType, offset int, err error) {
+func processTrashedNote(output *string, w *git.Worktree) func(value []byte, dataType jsonparser.ValueType, offset int, err error) {
 	return func(value []byte, dataType jsonparser.ValueType, offset int, err error) {
 		content, err := jsonparser.GetString(value, "content")
 		fmt.Println("Trashed: ", content)
 	}
 }
 
-func processNotes(output *string, file *zip.File) {
+func processNotes(output *string, w *git.Worktree, file *zip.File) {
 	data, err := file.Open()
 	if err != nil {
 		fmt.Println("Unable to read source/notes.json from archive")
@@ -114,11 +143,11 @@ func processNotes(output *string, file *zip.File) {
 		fmt.Println("Unable to read source/notes.json from archive")
 		log.Fatal(err)
 	}
-	_, err = jsonparser.ArrayEach(json, processActiveNote(output), "activeNotes")
+	_, err = jsonparser.ArrayEach(json, processActiveNote(output, w), "activeNotes")
 	if err != nil {
 		log.Fatal(err)
 	}
-	_, err = jsonparser.ArrayEach(json, processTrashedNote(output), "trashedNotes")
+	_, err = jsonparser.ArrayEach(json, processTrashedNote(output, w), "trashedNotes")
 	if err != nil {
 		log.Fatal(err)
 	}
