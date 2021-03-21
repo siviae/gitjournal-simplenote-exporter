@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"github.com/buger/jsonparser"
+	"github.com/go-git/go-git/v5"
 	"io"
 	"log"
 	"os"
@@ -20,8 +21,24 @@ func doMain(input *string, output *string) {
 	defer zipReader.Close()
 
 	err = os.Mkdir(*output, os.ModePerm)
+	needToInit := true
 	if err != nil {
-		fmt.Println("Unable to create existing directory", *output)
+		fmt.Println("Unable to create existing directory, expecting a git repository", *output)
+		needToInit = false
+	}
+
+	if needToInit {
+		_, err := git.PlainInit(*output, false)
+		if err != nil {
+			fmt.Println("Failed to init git repository")
+			log.Fatal(err)
+		}
+	} else {
+		_, err := git.PlainOpen(*output)
+		if err != nil {
+			fmt.Println("Failed to open existing git repository")
+			log.Fatal(err)
+		}
 	}
 
 	for _, file := range zipReader.File {
