@@ -9,7 +9,6 @@ import (
 	"log"
 	"os"
 	"path"
-	"strings"
 )
 
 func doMain(input *string, output *string) {
@@ -42,8 +41,8 @@ func processActiveNote(output *string) func(value []byte, dataType jsonparser.Va
 }
 
 func writeFile(folder *string, content *string, creationDate *string, lastModified *string) {
-	filename, done := extractFileName(content)
-	if done {
+	filename := extractFileName(content)
+	if len(filename) == 0 {
 		return
 	}
 
@@ -54,25 +53,29 @@ func writeFile(folder *string, content *string, creationDate *string, lastModifi
 	}
 	defer file.Close()
 	fmt.Fprintln(file, "---")
-	fmt.Fprintln(file, "created: ", creationDate)
-	fmt.Fprintln(file, "modified: ", lastModified)
+	fmt.Fprintln(file, "created: ", *creationDate)
+	fmt.Fprintln(file, "modified: ", *lastModified)
 	fmt.Fprintln(file, "---")
-	fmt.Fprint(file, content)
+	fmt.Fprint(file, *content)
 }
 
-func extractFileName(content *string) (string, bool) {
-	newLinePos := strings.Index(*content, "\n")
-	if newLinePos == -1 {
-		newLinePos = len(*content)
+func extractFileName(content *string) string {
+	size := 0
+	filename := make([]rune, 0, 128)
+	for _, char := range *content {
+		if size >= 64 {
+			break
+		}
+		if char == '\n' {
+			break
+		}
+		if char == os.PathSeparator || char == '\r' {
+			continue
+		}
+		filename = append(filename, char)
+		size++
 	}
-	if newLinePos > 64 {
-		newLinePos = 64
-	}
-	if newLinePos == 0 {
-		return "", true
-	}
-	filename := strings.Replace((*content)[:newLinePos], string(os.PathSeparator), "", -1)
-	return filename, false
+	return string(filename)
 }
 
 func processTrashedNote(output *string) func(value []byte, dataType jsonparser.ValueType, offset int, err error) {
