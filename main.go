@@ -59,27 +59,41 @@ func doMain(input *string, output *string) {
 
 func processActiveNote(output *string, w *git.Worktree) func(value []byte, dataType jsonparser.ValueType, offset int, err error) {
 	return func(value []byte, dataType jsonparser.ValueType, offset int, err error) {
-		content, err := jsonparser.GetString(value, "content")
-		creationDate, err := jsonparser.GetString(value, "creationDate")
-		lastModified, err := jsonparser.GetString(value, "lastModified")
+		content, _ := jsonparser.GetString(value, "content")
+		creationDate, _ := jsonparser.GetString(value, "creationDate")
+		lastModified, _ := jsonparser.GetString(value, "lastModified")
 		filename := writeFile(&content, output, &creationDate, &lastModified)
-		commitFile(w, filename)
+		if len(filename) > 0 {
+			commitFile(w, &filename, "Exported "+filename)
+		}
 	}
 }
 
-func processTrashedNote(output *string, w *git.Worktree) func(value []byte, dataType jsonparser.ValueType, offset int, err error) {
+func processTrashedNote(folder *string, w *git.Worktree) func(value []byte, dataType jsonparser.ValueType, offset int, err error) {
 	return func(value []byte, dataType jsonparser.ValueType, offset int, err error) {
-		//_, err := jsonparser.GetString(value, "content")
+		content, _ := jsonparser.GetString(value, "content")
+		creationDate, _ := jsonparser.GetString(value, "creationDate")
+		lastModified, _ := jsonparser.GetString(value, "lastModified")
+		filename := writeFile(&content, folder, &creationDate, &lastModified)
+		if len(filename) > 0 {
+			commitFile(w, &filename, "Exported to delete "+filename)
+			err2 := os.Remove(path.Join(*folder, filename))
+			if err2 != nil {
+				fmt.Println("Unable to remove file from worktree: ", filename)
+				log.Fatal(err2)
+			}
+			commitFile(w, &filename, "Deleted "+filename)
+		}
 	}
 }
 
-func commitFile(w *git.Worktree, filename string) {
-	_, err := w.Add(filename)
+func commitFile(w *git.Worktree, filename *string, commitMessage string) {
+	_, err := w.Add(*filename)
 	if err != nil {
 		fmt.Println("Unable to add file to worktree: ", filename)
 		log.Fatal(err)
 	}
-	_, err2 := w.Commit("Exported "+filename, &git.CommitOptions{
+	_, err2 := w.Commit(commitMessage, &git.CommitOptions{
 		Author: &object.Signature{
 			Name:  "GitJournal Exporter",
 			Email: "a@b.c",
