@@ -1,2 +1,0 @@
-- name: go-cross-build
-  uses: thatisuday/go-cross-build@v1.1.0
